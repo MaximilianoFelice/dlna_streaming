@@ -77,7 +77,7 @@ class ReadThread(threading.Thread):
     def run(self):
         while True:
             self.condition.acquire()
-            print "running thread to read", self.output.sizeToRead
+            #print "running thread to read", self.output.sizeToRead
             while self.output.sizeToRead > 0:
                 data = self.strm.read(4096*40)
                 self.output.outputFile.write(data)
@@ -88,7 +88,7 @@ class ReadThread(threading.Thread):
             self.output.sizeToRead = 0
             self.condition.notify_all()
             self.condition.release()
-            print "released"
+            #print "released"
 
 class DlnaFuse(fuse.Fuse):
     def __init__(self, *args, **kw):
@@ -98,6 +98,7 @@ class DlnaFuse(fuse.Fuse):
         self.needsMoreData.acquire()
         print "Main acquired"
         
+        #TODO: Do not open file for reading. Preliminary solution for creating file when not existing
         self.f = open(TEMP_FILE, "w+")
         
         live_filter = os.path.abspath(os.path.join(os.getcwd(), "matroska_live_filter.py"))
@@ -163,9 +164,9 @@ class DlnaFuse(fuse.Fuse):
         if self.outputFile.fileSize < offset + size:
             self.outputFile.sizeToRead = offset + size - self.outputFile.fileSize
 
-            print "waiting for more data"
+            #print "waiting for more data"
             self.needsMoreData.wait()
-            print "data got here!!"
+            #print "data got here!!"
 
         self.f.seek(offset, 0)
 
