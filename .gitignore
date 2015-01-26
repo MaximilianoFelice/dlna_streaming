@@ -1,0 +1,5 @@
+# Adding folders and files to be ignored:
+fuse_streaming.mkv
+fuse_live/*
+old/
+test.py
