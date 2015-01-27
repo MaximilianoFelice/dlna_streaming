@@ -98,8 +98,14 @@ class DlnaFuse(fuse.Fuse):
         self.needsMoreData.acquire()
         print "Main acquired"
         
-        #TODO: Do not open file for reading. Preliminary solution for creating file when not existing
-        self.f = open(TEMP_FILE, "w+")
+        # There might be a slightly better way to do this, but we must create a file
+        # if it doesn't exist. Still, we don't want it to be held open for writing
+        # purposes. That might lead to the SO blocking it when we get access.
+        if not os.path.isfile(TEMP_FILE):
+            aux = open(TEMP_FILE, "w+")
+            aux.close()
+
+        self.f = open(TEMP_FILE, "rb")
         
         live_filter = os.path.abspath(os.path.join(os.getcwd(), "matroska_live_filter.py"))
 
