@@ -75,15 +75,17 @@ class ReadThread(threading.Thread):
         self.condition = condition
 
     def run(self):
+        factor = 40
         while True:
             self.condition.acquire()
             #print "running thread to read", self.output.sizeToRead
             while self.output.sizeToRead > 0:
-                data = self.strm.read(4096*40)
+                data = self.strm.read(4096*factor)
                 self.output.outputFile.write(data)
                 self.output.outputFile.flush()
-                self.output.fileSize += len(data)
-                self.output.sizeToRead -= 4096*20
+                size = len(data)
+                self.output.fileSize += size
+                self.output.sizeToRead -= size
 
             self.output.sizeToRead = 0
             self.condition.notify_all()
