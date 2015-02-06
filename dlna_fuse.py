@@ -65,39 +65,37 @@ class ReadThread(threading.Thread):
         def __init__(self, filename):
             self.outputFile = open(filename, "wb")
             self.fileSize = 0
-            self.sizeToRead = 0
+            self.goal = 0
     
     def __init__(self, process, strm, output, condition):
         threading.Thread.__init__(self)
         self.process = process
         self.strm = strm
         self.output = output
-        self.condition = condition
+        self.flag = condition
 
     def run(self):
         factor = 40
         while True:
-            self.condition.acquire()
-            #print "running thread to read", self.output.sizeToRead
-            while self.output.sizeToRead > 0:
-                data = self.strm.read(4096*factor)
-                self.output.outputFile.write(data)
-                self.output.outputFile.flush()
-                size = len(data)
-                self.output.fileSize += size
-                self.output.sizeToRead -= size
+            
+            # Reading data from disk #
+            data = self.strm.read(4096*factor)
+            self.output.outputFile.write(data)
+            self.output.outputFile.flush()
 
-            self.output.sizeToRead = 0
-            self.condition.notify_all()
-            self.condition.release()
-            #print "released"
+            # Updating fileSize #
+            self.output.fileSize += len(data)
+
+            # Setting flag if condition is met #
+            if self.output.fileSize >= self.output.goal:
+                self.flag.set()
 
 class DlnaFuse(fuse.Fuse):
     def __init__(self, *args, **kw):
         fuse.Fuse.__init__(self, *args, **kw)
 
-        self.needsMoreData = threading.Condition()
-        self.needsMoreData.acquire()
+        self.needsMoreData = threading.Event()
+
         print "Main acquired"
         
         # There might be a slightly better way to do this, but we must create a file
@@ -125,6 +123,7 @@ class DlnaFuse(fuse.Fuse):
 
         self.recThread = ReadThread(self.process, self.process.stdout,
                       self.outputFile, self.needsMoreData)
+
         self.recThread.setDaemon(True)
 
     def getattr(self, path):
@@ -165,16 +164,14 @@ class DlnaFuse(fuse.Fuse):
 
         #If thread hasn't been started, we start it
         if not self.recThread.isAlive(): 
-            print "starting recording thread"
+            print "Starting recording thread"
             self.recThread.start()
 
-        #I have enough data to read from file
-        if self.outputFile.fileSize < offset + size:
-            self.outputFile.sizeToRead = offset + size - self.outputFile.fileSize
-
-            #print "waiting for more data"
+        # Check data availability
+        self.outputFile.goal = offset + size
+        if self.outputFile.fileSize < self.outputFile.goal:
+            self.needsMoreData.clear()
             self.needsMoreData.wait()
-            #print "data got here!!"
 
         self.f.seek(offset, 0)
 
