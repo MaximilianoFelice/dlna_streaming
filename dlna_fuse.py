@@ -28,13 +28,13 @@
 
 import errno
 import fuse
-import os
+import os, string, re
 import stat
 import subprocess
 import sys
 import threading
 import time
-import Queue
+import mmap
 
 fuse.fuse_python_api = (0, 2)
 
@@ -63,7 +63,13 @@ class MyStat(fuse.Stat):
 class ReadThread(threading.Thread):
     class Output:
         def __init__(self, filename):
-            self.outputFile = open(filename, "wb")
+            self.fd = os.open(filename, os.O_CREAT | os.O_RDWR)
+            self.step = 50 * 1024 * 1024
+            self.size = self.step
+
+            assert os.write(self.fd, '\x00' * self.size) == self.size
+
+            self.outputFile = mmap.mmap(self.fd, self.size, mmap.MAP_PRIVATE, prot = mmap.PROT_READ | mmap.PROT_WRITE)
             self.fileSize = 0
             self.goal = 0
     
@@ -75,13 +81,19 @@ class ReadThread(threading.Thread):
         self.flag = condition
 
     def run(self):
-        factor = 40
+        factor = 20
         while True:
+
+            # Checks if file (and the map) needs to be resized #
+            if (self.output.fileSize + (4096*factor)) > self.output.size:
+                print "Resizing file"
+                self.output.size += self.output.step
+                self.output.outputFile.resize(self.output.size)
             
             # Reading data from disk #
             data = self.strm.read(4096*factor)
+            self.output.outputFile.seek(self.output.fileSize)
             self.output.outputFile.write(data)
-            self.output.outputFile.flush()
 
             # Updating fileSize #
             self.output.fileSize += len(data)
@@ -101,15 +113,17 @@ class DlnaFuse(fuse.Fuse):
         # There might be a slightly better way to do this, but we must create a file
         # if it doesn't exist. Still, we don't want it to be held open for writing
         # purposes. That might lead to the SO blocking it when we get access.
-        if not os.path.isfile(TEMP_FILE):
-            aux = open(TEMP_FILE, "w+")
-            aux.close()
+        if os.path.isfile(TEMP_FILE):
+            os.remove(TEMP_FILE)
 
-        self.f = open(TEMP_FILE, "rb")
+        aux = open(TEMP_FILE, "w+")
+        aux.close()
+
+        self.outputFile = ReadThread.Output(TEMP_FILE)
         
         live_filter = os.path.abspath(os.path.join(os.getcwd(), "matroska_live_filter.py"))
 
-        cmd = ("ffmpeg -f alsa -ac 2 -i pulse -f x11grab -r 20 -s 1920x1080 -i :0.0 "
+        cmd = ("ffmpeg -f alsa -ac 2 -i pulse -f x11grab -r 30 -s 1920x1080 -i :0.0 "
             "-acodec ac3 -ac 4 -vcodec libx264 "
             "-profile:v high422 -preset medium -level:v 3.1 -pix_fmt yuv420p -crf 35 -threads 0 "
             "-f matroska - | %(live_filter)s - ") % locals()
@@ -119,8 +133,6 @@ class DlnaFuse(fuse.Fuse):
                                         stderr=subprocess.PIPE,
                                         shell=True)
         
-        self.outputFile = ReadThread.Output(TEMP_FILE)
-
         self.recThread = ReadThread(self.process, self.process.stdout,
                       self.outputFile, self.needsMoreData)
 
@@ -173,9 +185,9 @@ class DlnaFuse(fuse.Fuse):
             self.needsMoreData.clear()
             self.needsMoreData.wait()
 
-        self.f.seek(offset, 0)
+        self.outputFile.outputFile.seek(offset)
 
-        return self.f.read(size)
+        return self.outputFile.outputFile.read(size)
 
 def main():
     server = DlnaFuse(version="%prog " + fuse.__version__,
